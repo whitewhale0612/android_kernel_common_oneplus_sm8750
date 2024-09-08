@@ -3686,6 +3686,7 @@ static vm_fault_t do_wp_page(struct vm_fault *vmf)
 	const bool unshare = vmf->flags & FAULT_FLAG_UNSHARE;
 	struct vm_area_struct *vma = vmf->vma;
 	struct folio *folio = NULL;
+	bool can_reuse_whole_anon = false;
 
 	if (likely(!unshare)) {
 		if (userfaultfd_pte_wp(vma, ptep_get(vmf->pte))) {
@@ -3725,6 +3726,10 @@ static vm_fault_t do_wp_page(struct vm_fault *vmf)
 	}
 
 	trace_android_vh_do_wp_page(folio);
+
+	trace_android_vh_reuse_whole_anon_folio(folio, vmf, &can_reuse_whole_anon);
+	if (can_reuse_whole_anon)
+		return 0;
 
 	/*
 	 * Private mapping: create an exclusive anonymous page copy if reuse
@@ -4167,6 +4172,7 @@ static struct folio *alloc_swap_folio(struct vm_fault *vmf)
 
 	/* Try allocating the highest of the remaining orders. */
 	gfp = vma_thp_gfp_mask(vma);
+	trace_android_vh_alloc_swap_folio_gfp(vma, &gfp);
 	while (orders) {
 		addr = ALIGN_DOWN(vmf->address, PAGE_SIZE << order);
 		folio = vma_alloc_folio(gfp, order, vma, addr, true);
@@ -4639,9 +4645,9 @@ out_release:
 		folio_unlock(swapcache);
 		folio_put(swapcache);
 	}
-	if (need_clear_cache) {
+	if (need_clear_cache){
 		swapcache_clear(si, entry, nr_pages);
-		if (waitqueue_active(&swapcache_wq))
+	if (waitqueue_active(&swapcache_wq))
 			wake_up(&swapcache_wq);
 	}
 	if (si)
@@ -6592,10 +6598,8 @@ void __might_fault(const char *file, int line)
 	if (pagefault_disabled())
 		return;
 	__might_sleep(file, line);
-#if defined(CONFIG_DEBUG_ATOMIC_SLEEP)
-	if (current->mm)
+if (current->mm)
 		might_lock_read(&current->mm->mmap_lock);
-#endif
 }
 EXPORT_SYMBOL(__might_fault);
 #endif
