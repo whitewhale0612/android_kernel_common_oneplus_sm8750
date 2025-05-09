@@ -1,6 +1,6 @@
 WORKDIR="$(pwd)"
  echo "编译器信息:"
-          export PATH="/home/whitewhale/clang/bin:$PATH"
+          export PATH="/home/whitewhale/clang18/bin:$PATH"
           export CCACHE_COMPRESS=1     # 启用压缩
           export CCACHE_COMPRESSLEVEL=5   # 压缩级别
           export CCACHE_MAXSIZE=20G   # 缓存大小上限
