@@ -393,8 +393,12 @@ static void latency_model_input(struct latency_model *model,
 		if (bucket_index >= LM_LAT_BUCKET_COUNT)
 			bucket_index = LM_LAT_BUCKET_COUNT - 1;
 
-		model->small_bucket[bucket_index].count++;
-		model->small_bucket[bucket_index].sum_latency += latency;
+		local_bh_disable();
+		scoped_guard(spinlock, &model->buckets_lock) {
+			model->small_bucket[bucket_index].count++;
+			model->small_bucket[bucket_index].sum_latency += latency;
+		}
+		local_bh_enable();
 
 		if (unlikely(!model->base)) {
 			spin_unlock_irqrestore(&model->buckets_lock, flags);
@@ -413,9 +417,16 @@ static void latency_model_input(struct latency_model *model,
 		if (bucket_index >= LM_LAT_BUCKET_COUNT)
 			bucket_index = LM_LAT_BUCKET_COUNT - 1;
 
-		model->large_bucket[bucket_index].count++;
-		model->large_bucket[bucket_index].sum_latency += latency;
-		model->large_bucket[bucket_index].sum_block_size += block_size;
+		local_bh_disable();
+		scoped_guard(spinlock, &model->buckets_lock) {
+			if (!model->base || !pred_lat)
+				return;
+
+			model->large_bucket[bucket_index].count++;
+			model->large_bucket[bucket_index].sum_latency += latency;
+			model->large_bucket[bucket_index].sum_block_size += block_size;
+		}
+		local_bh_enable();
 	}
 
 	spin_unlock_irqrestore(&model->buckets_lock, flags);
