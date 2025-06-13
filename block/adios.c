@@ -21,7 +21,7 @@
 #include "blk-mq.h"
 #include "blk-mq-sched.h"
 
-#define ADIOS_VERSION "1.5.8"
+#define ADIOS_VERSION "1.5.12"
 
 // Define operation types supported by ADIOS
 enum adios_op_type {
@@ -393,12 +393,8 @@ static void latency_model_input(struct latency_model *model,
 		if (bucket_index >= LM_LAT_BUCKET_COUNT)
 			bucket_index = LM_LAT_BUCKET_COUNT - 1;
 
-		local_bh_disable();
-		scoped_guard(spinlock, &model->buckets_lock) {
-			model->small_bucket[bucket_index].count++;
-			model->small_bucket[bucket_index].sum_latency += latency;
-		}
-		local_bh_enable();
+		model->small_bucket[bucket_index].count++;
+		model->small_bucket[bucket_index].sum_latency += latency;
 
 		if (unlikely(!model->base)) {
 			spin_unlock_irqrestore(&model->buckets_lock, flags);
@@ -412,21 +408,14 @@ static void latency_model_input(struct latency_model *model,
 			return;
 		}
 
-		bucket_index = lm_input_bucket_index(model, latency, pred_lat);
+		bucket_index = lm_input_bucket_index(latency, pred_lat);
 
 		if (bucket_index >= LM_LAT_BUCKET_COUNT)
 			bucket_index = LM_LAT_BUCKET_COUNT - 1;
 
-		local_bh_disable();
-		scoped_guard(spinlock, &model->buckets_lock) {
-			if (!model->base || !pred_lat)
-				return;
-
-			model->large_bucket[bucket_index].count++;
-			model->large_bucket[bucket_index].sum_latency += latency;
-			model->large_bucket[bucket_index].sum_block_size += block_size;
-		}
-		local_bh_enable();
+		model->large_bucket[bucket_index].count++;
+		model->large_bucket[bucket_index].sum_latency += latency;
+		model->large_bucket[bucket_index].sum_block_size += block_size;
 	}
 
 	spin_unlock_irqrestore(&model->buckets_lock, flags);
@@ -761,11 +750,11 @@ static bool fill_batch_queues(struct adios_data *ad, u64 current_lat) {
 
 	reset_batch_counts(ad, page);
 
-	spin_lock_irqsave(&ad->lock, flags);
-	while (true) {
-		struct request *rq = next_request(ad);
-		if (!rq)
-			break;
+	scoped_guard(spinlock_irqsave, &ad->lock)
+		while (true) {
+			struct request *rq = next_request(ad);
+			if (!rq)
+				break;
 
 		struct adios_rq_data *rd = get_rq_data(rq);
 		u8 optype = adios_optype(rq);
@@ -777,17 +766,6 @@ static bool fill_batch_queues(struct adios_data *ad, u64 current_lat) {
 			current_lat > ad->global_latency_window)) {
 			break;
 		}
-
-		remove_request(ad, rq);
-
-		// Add request to the corresponding batch queue
-		list_add_tail(&rq->queuelist, &ad->batch_queue[page][optype]);
-		ad->batch_count[page][optype]++;
-		atomic64_add(rd->pred_lat, &ad->total_pred_lat);
-		optype_count[optype]++;
-		count++;
-	}
-	spin_unlock_irqrestore(&ad->lock, flags);
 
 	if (count) {
 		ad->more_bq_ready = true;
