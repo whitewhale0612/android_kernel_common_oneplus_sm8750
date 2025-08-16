@@ -50,9 +50,6 @@ DECLARE_HOOK(android_vh_keep_reclaimed_folio,
 DECLARE_HOOK(android_vh_clear_reclaimed_folio,
 	TP_PROTO(struct folio *folio, bool reclaimed),
 	TP_ARGS(folio, reclaimed));
-DECLARE_HOOK(android_vh_evict_folios_bypass,
-	TP_PROTO(struct folio *folio, bool *bypass),
-	TP_ARGS(folio, bypass));
 
 enum scan_balance;
 DECLARE_HOOK(android_vh_tune_scan_type,
@@ -119,6 +116,9 @@ DECLARE_HOOK(android_vh_direct_reclaim_begin,
 DECLARE_HOOK(android_vh_direct_reclaim_end,
 	TP_PROTO(int prio),
 	TP_ARGS(prio));
+DECLARE_HOOK(android_vh_should_split_folio_to_list,
+	TP_PROTO(struct folio *folio, bool *should_split_to_list),
+	TP_ARGS(folio, should_split_to_list));
 DECLARE_HOOK(android_vh_mm_isolate_priv_lru,
 	TP_PROTO(unsigned long nr_to_scan, struct lruvec *lruvec, enum lru_list lru,
 		struct list_head *dst, int reclaim_idx, bool may_unmap,

@@ -81,6 +81,9 @@
 #include <trace/hooks/perf.h>
 #include <trace/hooks/dmabuf.h>
 #include <trace/hooks/xhci.h>
+#include <trace/hooks/typec.h>
+#include <trace/events/android_vendor_lmk.h>
+#include <trace/hooks/swapfile.h>
 
 /*
  * Export tracepoints that act as a bare tracehook (ie: have no trace event
@@ -632,7 +635,6 @@ EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_filemap_get_folio);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_mm_compaction_begin);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_mm_compaction_end);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_do_read_fault);
-EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_evict_folios_bypass);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_mm_customize_lru_add_dst);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_mm_isolate_priv_lru);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_mm_customize_pgdat_balanced);
@@ -674,4 +676,3 @@ EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_perform_reclaim);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_kswapd_shrink_node);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_keep_reclaimed_folio);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_clear_reclaimed_folio);
-EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_evict_folios_bypass);

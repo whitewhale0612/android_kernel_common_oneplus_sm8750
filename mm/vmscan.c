@@ -5696,7 +5696,6 @@ retry:
 		DEFINE_MIN_SEQ(lruvec);
 		bool bypass = false;
 
-		trace_android_vh_evict_folios_bypass(folio, &bypass);
 		if (bypass)
 			continue;
 
