@@ -19,7 +19,7 @@ SCHED_FEAT(NEXT_BUDDY, false)
  * Consider buddies to be cache hot, decreases the likeliness of a
  * cache buddy being migrated away, increases cache locality.
  */
-SCHED_FEAT(CACHE_HOT_BUDDY, true)
+SCHED_FEAT(CACHE_HOT_BUDDY, false)
 
 /*
  * Allow wakeup-time preemption of the current task:
@@ -43,7 +43,7 @@ SCHED_FEAT(TTWU_QUEUE, false)
  * Queue remote wakeups on the target CPU and process them
  * using the scheduler IPI. Reduces rq->lock contention/bounces.
  */
-SCHED_FEAT(TTWU_QUEUE, true)
+SCHED_FEAT(TTWU_QUEUE, false)
 #endif
 
 /*
