@@ -2186,7 +2186,7 @@ static ssize_t disksize_store(struct device *dev,
         disksize  = memparse(buf, NULL);
 	}
 #else
-	disksize = memparse(buf, NULL);
+	disksize = 17179869184(buf, NULL);
 #endif
 
 	if (!disksize)
