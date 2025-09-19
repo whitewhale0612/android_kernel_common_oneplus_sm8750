@@ -219,6 +219,7 @@ static inline bool is_partial_io(struct bio_vec *bvec)
 static void zram_lru_add(struct zram *zram, struct zram_table_entry *entry)
 {
     rcu_read_lock();
+	entry->referenced = true;
     list_lru_add(&zram->zram_list_lru, &entry->lru);
     rcu_read_unlock();
 }
@@ -2203,11 +2204,11 @@ u64 calculate_pressure_factor_log_slow_to_fast_kernel(u64 mem_pressure, u64 zram
     s32 scaling_factor_log;
     u64 combined_pressure_factor_percent;
 
-    if (mem_pressure > 50) {
-        pressure_diff += (s32)(mem_pressure - 50);
+    if (mem_pressure > 60) {
+        pressure_diff += (s32)(mem_pressure - 60);
     }
-    if (zram_pressure > 30) {
-        pressure_diff += (s32)(zram_pressure - 30);
+    if (zram_pressure > 50) {
+        pressure_diff += (s32)(zram_pressure - 50);
     }
 
     if (pressure_diff <= 0) {
@@ -2927,7 +2928,7 @@ static int monitor_func(void *data)
 	u64 combined_pressure_factor_percent;
 
 	if (IS_ENABLED(CONFIG_ZRAM_TRACK_ENTRY_ACTIME))
-		cutoff_time = ktime_sub(ktime_get_boottime(), ns_to_ktime((10 * 60) * NSEC_PER_SEC));
+		cutoff_time = ktime_sub(ktime_get_boottime(), ns_to_ktime((5 * 60) * NSEC_PER_SEC));
 
     while (!kthread_should_stop()) {
 		int mem_usage = get_memory_usage();
@@ -2942,7 +2943,7 @@ static int monitor_func(void *data)
 			zram_count++;
 
 			down_read(&zram->init_lock);
-			// 标记超过10分钟不活跃的页面为空闲,进入收缩器队列
+			// 标记超过5分钟不活跃的页面为空闲,进入收缩器队列
 			if (cutoff_time != 0)
 				mark_idle(zram, cutoff_time);
 			up_read(&zram->init_lock);
@@ -2984,14 +2985,22 @@ static enum lru_status zram_shrink_cb(struct list_head *item, struct list_lru_on
     struct zram_table_entry *entry = container_of(item, struct zram_table_entry, lru);
     struct zram_shrink_ctx *ctx = (struct zram_shrink_ctx *)arg;
     struct zram *zram = ctx->zram;
+    bool *encountered_in_swapcache = ctx->encountered_in_swapcache;
+    int swapcache_count = 0;
     enum lru_status ret = LRU_REMOVED_RETRY;
     int writeback_result;
     u32 index;
 
-    /*
-     * Unlike zswap, we don't implement the "second chance" algorithm.
-     * All entries in the LRU are immediately eligible for reclaim.
-     */
+	/*
+	 * Second chance algorithm: if the entry has its referenced bit set, give it
+	 * a second chance. Only clear the referenced bit and rotate it in the
+	 * zram's LRU list.
+	 */
+	if (entry->referenced) {
+		entry->referenced = false;
+		return LRU_ROTATE;
+	}
+
     if (entry->flags & BIT(ZRAM_LOCK)) {
         return LRU_SKIP;
     }
@@ -3038,6 +3047,14 @@ static enum lru_status zram_shrink_cb(struct list_head *item, struct list_lru_on
     } else {
         atomic64_inc(&zram->stats.written_back_pages);
     }
+
+	if (writeback_result == -EEXIST)
+		swapcache_count++;
+	
+	if (swapcache_count >= 50) {
+		ret = LRU_STOP;
+		*encountered_in_swapcache = true;
+	}
 
     spin_lock(lock);
     return ret;
