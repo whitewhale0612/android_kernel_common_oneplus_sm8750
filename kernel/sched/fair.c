@@ -122,7 +122,7 @@ EXPORT_SYMBOL_GPL(sysctl_sched_base_slice);
  */
 unsigned int sysctl_sched_child_runs_first __read_mostly = 1;
 
-const_debug unsigned int sysctl_sched_migration_cost	= 0UL;
+const_debug unsigned int sysctl_sched_migration_cost	= 125000UL;
 
 int sched_thermal_decay_shift;
 static int __init setup_sched_thermal_decay_shift(char *str)
@@ -10277,6 +10277,17 @@ has_spare:
 
 		break;
 	}
+
+	/*
+	 * Candidate sg has no more than one task per CPU and has higher
+	 * per-CPU capacity. Migrating tasks to less capable CPUs may harm
+	 * throughput. Maximize throughput, power/energy consequences are not
+	 * considered.
+	 */
+	if ((env->sd->flags & SD_ASYM_CPUCAPACITY) &&
+	    (sgs->group_type <= group_fully_busy) &&
+	    (capacity_greater(sg->sgc->min_capacity, capacity_of(env->dst_cpu))))
+		return false;
 
 	return true;
 }
