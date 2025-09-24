@@ -320,19 +320,14 @@ extern s64 cpuidle_governor_latency_req(unsigned int cpu);
 		__ret = -1;						\
 	} else if (!idx) {						\
 		cpu_do_idle();						\
-		return idx;						\
-	}								\
-									\
-	if (!is_retention)						\
-		__ret =  cpu_pm_enter();				\
-	if (!__ret) {							\
-		if (!is_rcu)						\
-			ct_cpuidle_enter();				\
-		__ret = low_level_idle_enter(state);			\
-		if (!is_rcu)						\
-			ct_cpuidle_exit();				\
+	} else {							\
 		if (!is_retention)					\
-			cpu_pm_exit();					\
+			__ret = cpu_pm_enter();				\
+		if (!__ret) {						\
+			__ret = low_level_idle_enter(state);		\
+			if (!is_retention)				\
+				cpu_pm_exit();				\
+		}							\
 	}								\
 									\
 	__ret ? -1 : idx;						\
