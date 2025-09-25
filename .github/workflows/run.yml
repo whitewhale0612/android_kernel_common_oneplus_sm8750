@@ -15,7 +15,7 @@ jobs:
       uses: actions/checkout@v4
       with:
         repository: whitewhale0612/android_kernel_common_oneplus_sm8750
-        ref: v9
+        ref: v7
         path: kernel_source
     - name: Setup zyclang Toolchain
       run: |
