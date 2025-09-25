@@ -20,12 +20,14 @@ jobs:
 
     - name: Check branch info
       run: |
+        cd kernel_source
         echo "当前分支: $(git branch --show-current)"
         echo "HEAD commit: $(git rev-parse HEAD)"
         echo "远程分支关联:"
         git branch -vv
         echo "所有分支:"
         git branch -a
+        cd ~
 
         
     - name: Setup zyclang Toolchain
