@@ -17,6 +17,17 @@ jobs:
         repository: whitewhale0612/android_kernel_common_oneplus_sm8750
         ref: v7
         path: kernel_source
+
+    - name: Check branch info
+      run: |
+        echo "当前分支: $(git branch --show-current)"
+        echo "HEAD commit: $(git rev-parse HEAD)"
+        echo "远程分支关联:"
+        git branch -vv
+        echo "所有分支:"
+        git branch -a
+
+        
     - name: Setup zyclang Toolchain
       run: |
          
