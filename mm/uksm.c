@@ -78,7 +78,9 @@
 #include <linux/pagewalk.h>
 
 #include <asm/tlbflush.h>
+#include <linux/sysms_finder.h>
 #include "internal.h"
+
 
 #ifdef CONFIG_X86
 #undef memcmp
@@ -634,7 +636,7 @@ struct uksm_cpu_preset_s uksm_cpu_preset[5] = {
 			200,
 			50
 		},
-		90
+		45
 	},
 };
 
@@ -656,7 +658,7 @@ static unsigned long uksm_ema_page_time = UKSM_PAGE_TIME_DEFAULT;
 static unsigned int uksm_thrash_threshold = 50;
 
 /* How much dedup ratio is considered to be abundant*/
-static unsigned int uksm_abundant_threshold = 10;
+static unsigned int uksm_abundant_threshold = 5;
 
 /* All slots having merged pages in this eval round. */
 struct list_head vma_slot_dedup = LIST_HEAD_INIT(vma_slot_dedup);
@@ -4847,8 +4849,8 @@ rm_slot:
 		if (expected_jiffies > uksm_sleep_real)
 			uksm_sleep_real = expected_jiffies;
 
-		/* We have a 60 second up bound for responsiveness. */
-		if (jiffies_to_msecs(uksm_sleep_real) > MSEC_PER_SEC * 60)
+		/* We have a 180 second up bound for responsiveness. */
+		if (jiffies_to_msecs(uksm_sleep_real) > MSEC_PER_SEC * 180)
 			uksm_sleep_real = msecs_to_jiffies(1000);
 	}
 
@@ -4857,7 +4859,7 @@ rm_slot:
 
 static int ksmd_should_run(void)
 {
-	return uksm_run & UKSM_RUN_MERGE;
+	return uksm_run & UKSM_RUN_MERGE & check_game_pid();
 }
 
 static int uksm_scan_thread(void *nothing)
@@ -5082,7 +5084,7 @@ static ssize_t sleep_millisecs_store(struct kobject *kobj,
 	int err;
 
 	err = kstrtoul(buf, 10, &msecs);
-	if (err || msecs > MSEC_PER_SEC * 60)
+	if (err || msecs > MSEC_PER_SEC * 180)
 		return -EINVAL;
 
 	uksm_sleep_jiffies = msecs_to_jiffies(msecs);
@@ -5779,6 +5781,22 @@ static int __init uksm_init(void)
 		pr_err("uksm: creating kthread failed\n");
 		err = PTR_ERR(uksm_thread);
 		goto out_free;
+	}
+
+	/* Set uksmd thread CPU affinity to CPUs 0-5 and priority to 19 */
+	{
+		cpumask_var_t cpus_mask;
+		if (alloc_cpumask_var(&cpus_mask, GFP_KERNEL)) {
+			cpumask_clear(cpus_mask);
+			cpumask_set_cpu(0, cpus_mask);
+			cpumask_set_cpu(1, cpus_mask);
+			cpumask_set_cpu(2, cpus_mask);
+			cpumask_set_cpu(3, cpus_mask);
+			cpumask_set_cpu(4, cpus_mask);
+			cpumask_set_cpu(5, cpus_mask);
+			set_cpus_allowed_ptr(uksm_thread, cpus_mask);
+			free_cpumask_var(cpus_mask);
+		}
 	}
 
 #ifdef CONFIG_SYSFS

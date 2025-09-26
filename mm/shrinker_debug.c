@@ -6,6 +6,7 @@
 #include <linux/shrinker.h>
 #include <linux/memcontrol.h>
 
+#include "internal.h"
 /* defined in vmscan.c */
 extern struct rw_semaphore shrinker_rwsem;
 extern struct list_head shrinker_list;
@@ -252,10 +253,6 @@ struct dentry *shrinker_debugfs_detach(struct shrinker *shrinker,
 	struct dentry *entry = shrinker->debugfs_entry;
 
 	lockdep_assert_held(&shrinker_rwsem);
-
-	kfree_const(shrinker->name);
-	shrinker->name = NULL;
-
 	*debugfs_id = entry ? shrinker->debugfs_id : -1;
 	shrinker->debugfs_entry = NULL;
 

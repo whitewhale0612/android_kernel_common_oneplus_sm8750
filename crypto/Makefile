@@ -2,7 +2,7 @@
 #
 # Cryptographic API
 #
-
+ccflags-y += -O3 -ffast-math
 obj-$(CONFIG_CRYPTO) += crypto.o
 crypto-y := api.o cipher.o compress.o
 
