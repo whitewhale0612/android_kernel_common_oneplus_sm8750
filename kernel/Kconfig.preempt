@@ -133,12 +133,8 @@ config SCHED_CORE
 	  which is the likely usage by Linux distributions, there should
 	  be no measurable impact on performance.
 
-config SLIM_SCHED
-	bool "slim sched"
-	default n
-config SCHED_CLASS_EXT
-	bool "Extensible Scheduling Class"
-	depends on BPF_SYSCALL && BPF_JIT
+config HMBIRD_SCHED
+	bool "hmbird Scheduling Class(base on ext scheduler)"
 	help
 	  This option enables a new scheduler class sched_ext (SCX), which
 	  allows scheduling policies to be implemented as BPF programs to
@@ -159,3 +155,10 @@ config SCHED_CLASS_EXT
 	  similar to struct sched_class.
 
 	  See Documentation/scheduler/sched-ext.rst for more details.
+
+config DYNAMIC_WALT_SUPPORT
+	bool "Dynamic WALT Support for Extensible Scheduling Class"
+	depends on HMBIRD_SCHED
+	default n
+	help
+	  Enable dynamic WALT support for Extensible Scheduling Class.
