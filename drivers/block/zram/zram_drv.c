@@ -53,7 +53,7 @@
 
 #include "zram_drv.h"
 
-#define CHECK_INTERVAL (30 * HZ) // 每30秒检查一次
+#define CHECK_INTERVAL (90 * HZ) // 每30秒检查一次
 #define MEM_THRESHOLD 80
 
 static u64 batch_size = 512;
