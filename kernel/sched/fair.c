@@ -61,9 +61,9 @@
 
 EXPORT_TRACEPOINT_SYMBOL_GPL(sched_stat_runtime);
 
-#ifdef CONFIG_SCHED_BORE
+
 #include <linux/sched/bore.h>
-#endif // CONFIG_SCHED_BORE
+
 
 /*
  * Targeted preemption latency for CPU-bound tasks:
@@ -111,8 +111,8 @@ static const unsigned int nsecs_per_tick       = 1000000000ULL / HZ;
 unsigned int sysctl_sched_min_base_slice       = CONFIG_MIN_BASE_SLICE_NS;
 __read_mostly uint sysctl_sched_base_slice     = nsecs_per_tick;
 #else // !CONFIG_SCHED_BORE
-unsigned int sysctl_sched_base_slice			= 700000ULL;
-static unsigned int normalized_sysctl_sched_base_slice	= 700000ULL;
+unsigned int sysctl_sched_base_slice			= 750000ULL;
+static unsigned int normalized_sysctl_sched_base_slice	= 750000ULL;
 #endif // CONFIG_SCHED_BORE
 EXPORT_SYMBOL_GPL(sysctl_sched_base_slice);
 
@@ -1235,7 +1235,7 @@ static void update_curr(struct cfs_rq *cfs_rq)
 	schedstat_add(cfs_rq->exec_clock, delta_exec);
 
 #ifdef CONFIG_SCHED_BORE
-	update_curr_bore(delta_exec, curr);
+	update_burst_penalty(curr);
 #endif // CONFIG_SCHED_BORE
 	curr->vruntime += calc_delta_fair(delta_exec, curr);
 	update_deadline(cfs_rq, curr);
@@ -5326,9 +5326,14 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
 	}
 
 	se->vruntime = vruntime - lag;
+	if (true && se->rel_deadline) {
+		se->deadline += se->vruntime;
+		se->rel_deadline = 0;
+		return;
+	}
 
 #ifdef CONFIG_SCHED_BORE
-	if (likely(sched_bore))
+	else if (likely(sched_bore))
 		vslice >>= !!(flags & sched_deadline_boost_mask);
 	else
 #endif // CONFIG_SCHED_BORE
@@ -5443,6 +5448,7 @@ static void
 dequeue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
 {
 	int action = UPDATE_TG;
+	bool sleep = flags & DEQUEUE_SLEEP;
 
 	if (entity_is_task(se) && task_on_rq_migrating(task_of(se)))
 		action |= DO_DETACH;
@@ -5469,7 +5475,10 @@ dequeue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
 	clear_buddies(cfs_rq, se);
 
 	update_entity_lag(cfs_rq, se);
-
+    if (true && !sleep) {
+		se->deadline -= se->vruntime;
+		se->rel_deadline = 1;
+	}
 	if (se != cfs_rq->curr)
 		__dequeue_entity(cfs_rq, se);
 	se->on_rq = 0;
@@ -12947,27 +12956,18 @@ static void attach_task_cfs_rq(struct task_struct *p)
 
 static void switched_from_fair(struct rq *rq, struct task_struct *p)
 {
-	detach_task_cfs_rq(p);
-}
-
-static void switched_to_fair(struct rq *rq, struct task_struct *p)
-{
+	p->se.rel_deadline = 0;
 #ifdef CONFIG_SCHED_BORE
 	reset_task_bore(p);
 #endif // CONFIG_SCHED_BORE
-	attach_task_cfs_rq(p);
+	detach_task_cfs_rq(p);
 
-	if (task_on_rq_queued(p)) {
 		/*
 		 * We were most likely switched from sched_rt, so
 		 * kick off the schedule if running, otherwise just see
 		 * if we can still preempt the current task.
 		 */
-		if (task_current(rq, p))
-			resched_curr(rq);
-		else
-			check_preempt_curr(rq, p, 0);
-	}
+		
 }
 
 /* Account for a task changing its policy or group.
@@ -13349,7 +13349,7 @@ DEFINE_SCHED_CLASS(fair) = {
 
 	.prio_changed		= prio_changed_fair,
 	.switched_from		= switched_from_fair,
-	.switched_to		= switched_to_fair,
+
 
 	.get_rr_interval	= get_rr_interval_fair,
 

@@ -7,12 +7,13 @@
 #define SCHED_BORE_AUTHOR   "Masahito Suzuki"
 #define SCHED_BORE_PROGNAME "BORE CPU Scheduler modification"
 
-#define SCHED_BORE_VERSION  "6.1.1"
+#define SCHED_BORE_VERSION  "5.9.6"
 
 #ifdef CONFIG_SCHED_BORE
 extern u8   __read_mostly sched_bore;
 extern u8   __read_mostly sched_burst_exclude_kthreads;
-extern u8   __read_mostly sched_burst_smoothness;
+extern u8   __read_mostly sched_burst_smoothness_long;
+extern u8   __read_mostly sched_burst_smoothness_short;
 extern u8   __read_mostly sched_burst_fork_atavistic;
 extern u8   __read_mostly sched_burst_parity_threshold;
 extern u8   __read_mostly sched_burst_penalty_offset;
@@ -21,10 +22,8 @@ extern uint __read_mostly sched_burst_cache_stop_count;
 extern uint __read_mostly sched_burst_cache_lifetime;
 extern uint __read_mostly sched_deadline_boost_mask;
 
-extern u8 effective_prio_bore(struct task_struct *p);
 extern void update_burst_score(struct sched_entity *se);
-extern void update_curr_bore(u64 delta_exec, struct sched_entity *se);
-
+extern void update_burst_penalty(struct sched_entity *se);
 extern void restart_burst(struct sched_entity *se);
 extern void restart_burst_rescale_deadline(struct sched_entity *se);
 
@@ -41,9 +40,10 @@ extern void reweight_entity(
 	struct cfs_rq *cfs_rq, struct sched_entity *se, unsigned long weight);
 
 struct sched_burst_cache {
-	u32				value;
+	u8				score;
 	u32				count;
 	u64				timestamp;
+	spinlock_t		lock;
 };
 
 struct sched_bore_stats  {
@@ -52,8 +52,6 @@ struct sched_bore_stats  {
 	u32				curr_burst_penalty;
 	u32				burst_penalty;
 	u8				burst_score;
-	u8				burst_count;
-	bool			stop_burst_update;
 	struct sched_burst_cache child_burst;
 	struct sched_burst_cache group_burst;
 };
