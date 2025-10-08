@@ -103,9 +103,10 @@
 #include <trace/hooks/sched.h>
 #include <trace/hooks/cgroup.h>
 #include <trace/hooks/dtask.h>
-static int effective_prio(struct task_struct *p);
-#include <linux/sched/bore.h>
 
+#ifdef CONFIG_SCHED_BORE
+#include <linux/sched/bore.h>
+#endif // CONFIG_SCHED_BORE
 
 EXPORT_TRACEPOINT_SYMBOL_GPL(ipi_send_cpu);
 EXPORT_TRACEPOINT_SYMBOL_GPL(ipi_send_cpumask);
@@ -179,7 +180,6 @@ DEFINE_STATIC_KEY_FALSE(__sched_core_enabled);
 
 
 /* kernel prio, less is more */
-
 static inline int __task_prio(const struct task_struct *p)
 {
 	if (p->sched_class == &stop_sched_class) /* trumps deadline */
@@ -1363,7 +1363,7 @@ int tg_nop(struct task_group *tg, void *data)
 void set_load_weight(struct task_struct *p, bool update_load)
 {
 #ifdef CONFIG_SCHED_BORE
-	int prio = effective_prio(p);
+	int prio = effective_prio_bore(p);
 #else // !CONFIG_SCHED_BORE
 	int prio = p->static_prio - MAX_RT_PRIO;
 #endif // CONFIG_SCHED_BORE

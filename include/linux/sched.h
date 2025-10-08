@@ -40,6 +40,7 @@
 #include <linux/android_vendor.h>
 #include <linux/android_kabi.h>
 #include <asm/kmap_size.h>
+
 /* task_struct member predeclarations (sorted alphabetically): */
 struct audit_context;
 struct bio_list;
@@ -538,15 +539,13 @@ struct sched_bore_stats;
 
 struct sched_entity {
 	/* For load-balancing: */
-	
 	struct load_weight		load;
 	struct rb_node			run_node;
 	u64				deadline;
 	u64				min_vruntime;
 
 	struct list_head		group_node;
-	unsigned char			on_rq;
-	unsigned char			rel_deadline;
+	unsigned int			on_rq;
 
 	u64				exec_start;
 	u64				sum_exec_runtime;
@@ -554,12 +553,8 @@ struct sched_entity {
 	u64				vruntime;
 	s64				vlag;
 	u64				slice;
-	u32				prev_burst_penalty;
-	u32				curr_burst_penalty;
-	u32				burst_penalty;
 
 	u64				nr_migrations;
-	
 
 #ifdef CONFIG_FAIR_GROUP_SCHED
 	int				depth;

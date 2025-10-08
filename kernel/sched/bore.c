@@ -1,6 +1,6 @@
 /*
  *  Burst-Oriented Response Enhancer (BORE) CPU Scheduler
- *  Copyright (C) 2021-2024 Masahito Suzuki <firelzrd@gmail.com>
+ *  Copyright (C) 2021-2025 Masahito Suzuki <firelzrd@gmail.com>
  */
 #include <linux/cpuset.h>
 #include <linux/sched/task.h>
@@ -10,35 +10,37 @@
 #ifdef CONFIG_SCHED_BORE
 u8   __read_mostly sched_bore                   = 1;
 u8   __read_mostly sched_burst_exclude_kthreads = 1;
-u8   __read_mostly sched_burst_smoothness_long  = 1;
-u8   __read_mostly sched_burst_smoothness_short = 0;
-u8   __read_mostly sched_burst_fork_atavistic   = 2;
+u8   __read_mostly sched_burst_smoothness       = 40;
+u8   __read_mostly sched_burst_fork_atavistic   = 1;
 u8   __read_mostly sched_burst_parity_threshold = 2;
 u8   __read_mostly sched_burst_penalty_offset   = 24;
-uint __read_mostly sched_burst_penalty_scale    = 1280;
+uint __read_mostly sched_burst_penalty_scale    = 3180;
 uint __read_mostly sched_burst_cache_stop_count = 64;
 uint __read_mostly sched_burst_cache_lifetime   = 75000000;
 uint __read_mostly sched_deadline_boost_mask    = ENQUEUE_INITIAL
                                                 | ENQUEUE_WAKEUP;
-static int __maybe_unused sixty_four     = 64;
-static int __maybe_unused maxval_u8      = 255;
+static int __maybe_unused maxval_prio    =   39;
+static int __maybe_unused maxval_6_bits  =   63;
+static int __maybe_unused maxval_8_bits  =  255;
 static int __maybe_unused maxval_12_bits = 4095;
 
-#define MAX_BURST_PENALTY (39U <<2)
+#define BURST_PENALTY_SHIFT 12
+#define MAX_BURST_PENALTY ((40U << BURST_PENALTY_SHIFT) - 1)
 
-static inline u32 log2plus1_u64_u32f8(u64 v) {
-	u32 integral = fls64(v);
-	u8  fractional = v << (64 - integral) >> 55;
-	return integral << 8 | fractional;
+static u32 log2p1_u64_u32fp(u64 v, u8 fp) {
+	if (!v) return 0;
+	u32 exponent = fls64(v);
+	u32 mantissa = (u32)(v << (64 - exponent) << 1 >> (64 - fp));
+	return exponent << fp | mantissa;
 }
 
 static inline u32 calc_burst_penalty(u64 burst_time) {
 	u32 greed, tolerance, penalty, scaled_penalty;
 	
-	greed = log2plus1_u64_u32f8(burst_time);
-	tolerance = sched_burst_penalty_offset << 8;
+	greed = log2p1_u64_u32fp(burst_time, BURST_PENALTY_SHIFT);
+	tolerance = sched_burst_penalty_offset << BURST_PENALTY_SHIFT;
 	penalty = max(0, (s32)(greed - tolerance));
-	scaled_penalty = penalty * sched_burst_penalty_scale >> 16;
+	scaled_penalty = penalty * sched_burst_penalty_scale >> 10;
 
 	return min(MAX_BURST_PENALTY, scaled_penalty);
 }
@@ -53,55 +55,66 @@ static void reweight_task_by_prio(struct task_struct *p, int prio) {
 	struct sched_entity *se = &p->se;
 	unsigned long weight = scale_load(sched_prio_to_weight[prio]);
 
+	se->bore_stats->stop_burst_update = true;
 	reweight_entity(cfs_rq_of(se), se, weight);
+	se->bore_stats->stop_burst_update = false;
 	se->load.inv_weight = sched_prio_to_wmult[prio];
 }
 
-static inline u8 effective_prio(struct task_struct *p) {
+inline u8 effective_prio_bore(struct task_struct *p) {
 	u8 prio = p->static_prio - MAX_RT_PRIO;
 	if (likely(sched_bore))
 		prio += p->se.bore_stats->burst_score;
-	return min(39, prio);
+	return min(maxval_prio, prio);
 }
 
 void update_burst_score(struct sched_entity *se) {
 	if (!entity_is_task(se)) return;
 	struct task_struct *p = task_of(se);
-	u8 prev_prio = effective_prio(p);
+	u8 prev_prio = effective_prio_bore(p);
 
 	u8 burst_score = 0;
 	if (!((p->flags & PF_KTHREAD) && likely(sched_burst_exclude_kthreads)))
-		burst_score = se->bore_stats->burst_penalty >> 2;
+		burst_score = se->bore_stats->burst_penalty >> BURST_PENALTY_SHIFT;
 	se->bore_stats->burst_score = burst_score;
 
-	u8 new_prio = effective_prio(p);
+	u8 new_prio = effective_prio_bore(p);
 	if (new_prio != prev_prio)
 		reweight_task_by_prio(p, new_prio);
 }
 
-void update_burst_penalty(struct sched_entity *se) {
+void update_curr_bore(u64 delta_exec, struct sched_entity *se) {
+	if (!entity_is_task(se) || se->bore_stats->stop_burst_update) return;
+
+	se->bore_stats->burst_time += delta_exec;
 	se->bore_stats->curr_burst_penalty = calc_burst_penalty(se->bore_stats->burst_time);
-	se->burst_penalty = max(se->prev_burst_penalty, se->curr_burst_penalty);
+	if (se->bore_stats->curr_burst_penalty > se->bore_stats->prev_burst_penalty)
+		se->bore_stats->burst_penalty = se->bore_stats->prev_burst_penalty +
+		(se->bore_stats->curr_burst_penalty - se->bore_stats->prev_burst_penalty) / se->bore_stats->burst_count;
 	update_burst_score(se);
 }
 
-static inline u32 binary_smooth(u32 new, u32 old) {
-	int increment = new - old;
-	return (0 <= increment)?
-		old + ( increment >> (int)sched_burst_smoothness_long):
-		old - (-increment >> (int)sched_burst_smoothness_short);
+static inline u32 binary_smooth(u32 new, u32 old, u8 damper) {
+	u32 abs_diff = (new > old)? (new - old): (old - new);
+	u32 adj_diff = (abs_diff / damper) + ((abs_diff % damper) != 0);
+	return (new > old)? (old + adj_diff): (old - adj_diff);
 }
 
-static void revolve_burst_penalty(struct sched_entity *se) {
-	se->prev_burst_penalty = 
-	binary_smooth(se->curr_burst_penalty, se->prev_burst_penalty);
+static void __restart_burst(struct sched_entity *se) {
+	se->bore_stats->prev_burst_penalty = binary_smooth(
+		se->bore_stats->curr_burst_penalty, se->bore_stats->prev_burst_penalty, se->bore_stats->burst_count);
 	se->bore_stats->burst_time = 0;
 	se->bore_stats->curr_burst_penalty = 0;
 
+	u8 smoothness = sched_burst_smoothness;
+	if (se->bore_stats->burst_count < smoothness)
+		se->bore_stats->burst_count++;
+	else if (unlikely(se->bore_stats->burst_count > smoothness))
+		se->bore_stats->burst_count = smoothness;
 }
 
 inline void restart_burst(struct sched_entity *se) {
-	revolve_burst_penalty(se);
+	__restart_burst(se);
 	se->bore_stats->burst_penalty = se->bore_stats->prev_burst_penalty;
 	update_burst_score(se);
 }
@@ -109,9 +122,9 @@ inline void restart_burst(struct sched_entity *se) {
 void restart_burst_rescale_deadline(struct sched_entity *se) {
 	s64 vscaled, wremain, vremain = se->deadline - se->vruntime;
 	struct task_struct *p = task_of(se);
-	u8 prev_prio = effective_prio(p);
+	u8 prev_prio = effective_prio_bore(p);
 	restart_burst(se);
-	u8 new_prio = effective_prio(p);
+	u8 new_prio = effective_prio_bore(p);
 	if (prev_prio > new_prio) {
 		wremain = __unscale_slice(abs(vremain), prev_prio);
 		vscaled = __scale_slice(wremain, new_prio);
@@ -124,7 +137,7 @@ void restart_burst_rescale_deadline(struct sched_entity *se) {
 static inline bool task_is_bore_eligible(struct task_struct *p)
 {return p && p->sched_class == &fair_sched_class && !p->exit_state;}
 
-static void reset_task_weights_bore(void) {
+static inline void reset_task_weights_bore(void) {
 	struct task_struct *task;
 	struct rq *rq;
 	struct rq_flags rf;
@@ -132,11 +145,10 @@ static void reset_task_weights_bore(void) {
 	write_lock_irq(&tasklist_lock);
 	for_each_process(task) {
 		if (!task_is_bore_eligible(task)) continue;
-		rq = task_rq(task);
-    	rq_pin_lock(rq, &rf);
+		rq = task_rq_lock(task, &rf);
 		update_rq_clock(rq);
-		reweight_task_by_prio(task, effective_prio(task));
-		rq_unpin_lock(rq, &rf);
+		reweight_task_by_prio(task, effective_prio_bore(task));
+		task_rq_unlock(rq, task, &rf);
 	}
 	write_unlock_irq(&tasklist_lock);
 }
@@ -155,13 +167,9 @@ int sched_bore_update_handler(struct ctl_table *table, int write,
 #define for_each_child(p, t) \
 	list_for_each_entry(t, &(p)->children, sibling)
 
-static u32 count_entries_upto2(struct list_head *head) {
+static inline u32 count_entries_upto2(struct list_head *head) {
 	struct list_head *next = head->next;
 	return (next != head) + (next->next != head);
-}
-static inline void init_task_burst_cache_lock(struct task_struct *p) {
-	spin_lock_init(&p->se.bore_stats->child_burst.lock);
-	spin_lock_init(&p->se.bore_stats->group_burst.lock);
 }
 
 static inline bool burst_cache_expired(struct sched_burst_cache *bc, u64 now)
@@ -169,8 +177,8 @@ static inline bool burst_cache_expired(struct sched_burst_cache *bc, u64 now)
 
 static void update_burst_cache(struct sched_burst_cache *bc,
 	struct task_struct *p, u32 cnt, u32 sum, u64 now) {
-	u8 avg = cnt ? sum / cnt : 0;
-	bc->score = max(avg, p->se.bore_stats->burst_penalty);
+	u32 avg = cnt ? sum / cnt : 0;
+	bc->value = max(avg, p->se.bore_stats->burst_penalty);
 	bc->count = cnt;
 	bc->timestamp = now;
 }
@@ -188,7 +196,7 @@ static inline void update_child_burst_direct(struct task_struct *p, u64 now) {
 	update_burst_cache(&p->se.bore_stats->child_burst, p, cnt, sum, now);
 }
 
-static inline u8 inherit_burst_direct(
+static inline u32 inherit_burst_direct(
 	struct task_struct *p, u64 now, u64 clone_flags) {
 	struct task_struct *parent = p;
 	struct sched_burst_cache *bc;
@@ -200,7 +208,7 @@ static inline u8 inherit_burst_direct(
 	if (burst_cache_expired(bc, now))
 		update_child_burst_direct(parent, now);
 
-	return bc->score;
+	return bc->value;
 }
 
 static void update_child_burst_topological(
@@ -221,19 +229,13 @@ static void update_child_burst_topological(
 			continue;
 		}
 		bc = &dec->se.bore_stats->child_burst;
-		spin_lock(&bc->lock);
 		if (!burst_cache_expired(bc, now)) {
 			cnt += bc->count;
-			sum += (u32)bc->score * bc->count;
-			if (sched_burst_cache_stop_count <= cnt) {
-				spin_unlock(&bc->lock);
-				break;
-			}
-			spin_unlock(&bc->lock);
+			sum += bc->value * bc->count;
+			if (sched_burst_cache_stop_count <= cnt) break;
 			continue;
 		}
 		update_child_burst_topological(dec, now, depth - 1, &cnt, &sum);
-	    spin_unlock(&bc->lock);
 	}
 
 	update_burst_cache(&p->se.bore_stats->child_burst, p, cnt, sum, now);
@@ -241,7 +243,7 @@ static void update_child_burst_topological(
 	*asum += sum;
 }
 
-static inline u8 inherit_burst_topological(
+static inline u32 inherit_burst_topological(
 	struct task_struct *p, u64 now, u64 clone_flags) {
 	struct task_struct *anc = p;
 	struct sched_burst_cache *bc;
@@ -261,12 +263,11 @@ static inline u8 inherit_burst_topological(
 	}
 
 	bc = &anc->se.bore_stats->child_burst;
-	guard(spinlock)(&bc->lock);
 	if (burst_cache_expired(bc, now))
 		update_child_burst_topological(
 			anc, now, sched_burst_fork_atavistic - 1, &cnt, &sum);
 
-	return bc->score;
+	return bc->value;
 }
 
 static inline void update_tg_burst(struct task_struct *p, u64 now) {
@@ -282,42 +283,35 @@ static inline void update_tg_burst(struct task_struct *p, u64 now) {
 	update_burst_cache(&p->se.bore_stats->group_burst, p, cnt, sum, now);
 }
 
-static inline u8 inherit_burst_tg(struct task_struct *p, u64 now) {
-	struct task_struct *parent = rcu_dereference(p->group_leader);
+static inline u32 inherit_burst_tg(struct task_struct *p, u64 now) {
+	struct task_struct *parent = p->group_leader;
 	struct sched_burst_cache *bc = &parent->se.bore_stats->group_burst;
 	if (burst_cache_expired(bc, now))
 		update_tg_burst(parent, now);
 
-	return bc->score;
+	return bc->value;
 }
 
-void sched_clone_bore(struct task_struct *p,struct task_struct *parent, u64 clone_flags, u64 now) {
+void sched_clone_bore(struct task_struct *p,
+	struct task_struct *parent, u64 clone_flags, u64 now) {
 	struct sched_entity *se = &p->se;
-	u8 penalty;
+	u32 penalty;
 
-	init_task_burst_cache_lock(p);
+	if (!task_is_bore_eligible(p)) return;
 
-	if (!task_is_bore_eligible(p)) 
-		return;
-	if (clone_flags & CLONE_THREAD) {
-		rcu_read_lock();
-		penalty = inherit_burst_tg(parent, now);
-		rcu_read_unlock();
-	} else {
-		read_lock(&tasklist_lock);
-		penalty = likely(sched_burst_fork_atavistic) ?
+	penalty = (clone_flags & CLONE_THREAD)?
+		inherit_burst_tg(parent, now):
+		(likely(sched_burst_fork_atavistic)?
 			inherit_burst_topological(parent, now, clone_flags):
-			inherit_burst_direct(parent, now, clone_flags);
-		read_unlock(&tasklist_lock);
-	}
+			inherit_burst_direct(parent, now, clone_flags));
 
-	revolve_burst_penalty(se);
+	__restart_burst(se);
 	se->bore_stats->burst_penalty = se->bore_stats->prev_burst_penalty =
 		max(se->bore_stats->prev_burst_penalty, penalty);
+	se->bore_stats->burst_count = 1;
 	se->bore_stats->child_burst.timestamp = 0;
 	se->bore_stats->group_burst.timestamp = 0;
 }
-
 
 void reset_task_bore(struct task_struct *p) {
 	p->se.bore_stats->burst_time = 0;
@@ -325,7 +319,7 @@ void reset_task_bore(struct task_struct *p) {
 	p->se.bore_stats->curr_burst_penalty = 0;
 	p->se.bore_stats->burst_penalty = 0;
 	p->se.bore_stats->burst_score = 0;
-	
+	p->se.bore_stats->burst_count = 1;
 	memset(&p->se.bore_stats->child_burst, 0, sizeof(struct sched_burst_cache));
 	memset(&p->se.bore_stats->group_burst, 0, sizeof(struct sched_burst_cache));
 }
@@ -338,7 +332,6 @@ void __init sched_bore_init(void) {
         pr_err("Failed to allocate bore_stats for init_task\n");
     }
 	reset_task_bore(&init_task);
-	init_task_burst_cache_lock(&init_task);
 }
 
 #ifdef CONFIG_SYSCTL
@@ -362,22 +355,13 @@ static struct ctl_table sched_bore_sysctls[] = {
 		.extra2		= SYSCTL_ONE,
 	},
 	{
-		.procname	= "sched_burst_smoothness_long",
-		.data		= &sched_burst_smoothness_long,
+		.procname	= "sched_burst_smoothness",
+		.data		= &sched_burst_smoothness,
 		.maxlen		= sizeof(u8),
 		.mode		= 0644,
 		.proc_handler = proc_dou8vec_minmax,
-		.extra1		= SYSCTL_ZERO,
-		.extra2		= SYSCTL_ONE,
-	},
-	{
-		.procname	= "sched_burst_smoothness_short",
-		.data		= &sched_burst_smoothness_short,
-		.maxlen		= sizeof(u8),
-		.mode		= 0644,
-		.proc_handler = proc_dou8vec_minmax,
-		.extra1		= SYSCTL_ZERO,
-		.extra2		= SYSCTL_ONE,
+		.extra1		= SYSCTL_ONE,
+		.extra2		= &maxval_8_bits,
 	},
 	{
 		.procname	= "sched_burst_fork_atavistic",
@@ -395,7 +379,7 @@ static struct ctl_table sched_bore_sysctls[] = {
 		.mode		= 0644,
 		.proc_handler = proc_dou8vec_minmax,
 		.extra1		= SYSCTL_ZERO,
-		.extra2		= &maxval_u8,
+		.extra2		= &maxval_8_bits,
 	},
 	{
 		.procname	= "sched_burst_penalty_offset",
@@ -404,7 +388,7 @@ static struct ctl_table sched_bore_sysctls[] = {
 		.mode		= 0644,
 		.proc_handler = proc_dou8vec_minmax,
 		.extra1		= SYSCTL_ZERO,
-		.extra2		= &sixty_four,
+		.extra2		= &maxval_6_bits,
 	},
 	{
 		.procname	= "sched_burst_penalty_scale",
@@ -442,7 +426,6 @@ static int __init sched_bore_sysctl_init(void) {
 	register_sysctl_init("kernel", sched_bore_sysctls);
 	return 0;
 }
-
 late_initcall(sched_bore_sysctl_init);
 #endif // CONFIG_SYSCTL
 #endif // CONFIG_SCHED_BORE

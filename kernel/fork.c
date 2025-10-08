@@ -114,7 +114,9 @@
 #include <asm/cacheflush.h>
 #include <asm/tlbflush.h>
 
+#ifdef CONFIG_SCHED_BORE
 #include <linux/sched/bore.h>
+#endif // CONFIG_SCHED_BORE
 
 #include <trace/events/sched.h>
 
@@ -2695,6 +2697,12 @@ __latent_entropy struct task_struct *copy_process(
 
 	p->start_time = ktime_get_ns();
 	p->start_boottime = ktime_get_boottime_ns();
+
+	/*
+	 * Make it visible to the rest of the system, but dont wake it up yet.
+	 * Need tasklist lock for parent etc handling!
+	 */
+	write_lock_irq(&tasklist_lock);
 #ifdef CONFIG_SCHED_BORE
 	p->se.bore_stats = kzalloc(sizeof(struct sched_bore_stats), GFP_KERNEL);
 	if (unlikely(!p->se.bore_stats)) {
@@ -2706,10 +2714,6 @@ __latent_entropy struct task_struct *copy_process(
 		sched_clone_bore(p, current, clone_flags, p->start_time);
 #endif // CONFIG_SCHED_BORE
 
-	/*
-	 * Make it visible to the rest of the system, but dont wake it up yet.
-	 * Need tasklist lock for parent etc handling!
-	 */
 	/* CLONE_PARENT re-uses the old parent */
 	if (clone_flags & (CLONE_PARENT|CLONE_THREAD)) {
 		p->real_parent = current->real_parent;
