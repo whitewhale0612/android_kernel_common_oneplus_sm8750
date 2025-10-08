@@ -508,7 +508,11 @@ struct sched_statistics {
 	u64				block_max;
 	s64				sum_block_runtime;
 
+#ifndef __GENKSYMS__
+	s64				exec_max;
+#else
 	u64				exec_max;
+#endif
 	u64				slice_max;
 
 	u64				nr_migrations_cold;
@@ -533,9 +537,11 @@ struct sched_statistics {
 #endif /* CONFIG_SCHEDSTATS */
 } ____cacheline_aligned;
 
-#ifdef CONFIG_SCHED_BORE
-struct sched_bore_stats;
-#endif // CONFIG_SCHED_BORE
+struct sched_entity_ext {
+	unsigned char			custom_slice;
+	unsigned char			sched_delayed;
+	unsigned char			rel_deadline;
+};
 
 struct sched_entity {
 	/* For load-balancing: */
@@ -547,6 +553,7 @@ struct sched_entity {
 	struct list_head		group_node;
 	unsigned int			on_rq;
 
+					/* hole */
 	u64				exec_start;
 	u64				sum_exec_runtime;
 	u64				prev_sum_exec_runtime;
@@ -576,11 +583,8 @@ struct sched_entity {
 	 */
 	struct sched_avg		avg;
 #endif
-#ifdef CONFIG_SCHED_BORE
-	ANDROID_KABI_USE(1, struct sched_bore_stats *bore_stats);
-#else // !CONFIG_SCHED_BORE
-	ANDROID_KABI_RESERVE(1);
-#endif // CONFIG_SCHED_BORE
+
+	ANDROID_KABI_USE(1, struct sched_entity_ext ext);
 	ANDROID_KABI_RESERVE(2);
 	ANDROID_KABI_RESERVE(3);
 	ANDROID_KABI_RESERVE(4);
