@@ -107,6 +107,9 @@ SCHED_FEAT(PLACE_REL_DEADLINE, true)
  *
  * DELAY_ZERO clips the lag on dequeue (or wakeup) to 0.
  */
-SCHED_FEAT(DELAY_DEQUEUE, true)
+SCHED_FEAT(DELAY_DEQUEUE, false)
 SCHED_FEAT(DELAY_ZERO, true)
+#ifdef CONFIG_SCHED_BORE
+SCHED_FEAT(RUN_TO_PARITY_BORE, false)
+#endif /* CONFIG_SCHED_BORE */
 #endif
