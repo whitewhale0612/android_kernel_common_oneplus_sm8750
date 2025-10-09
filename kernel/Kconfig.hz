@@ -55,6 +55,9 @@ config HZ
 	default 300 if HZ_300
 	default 1000 if HZ_1000
 
+config SCHED_HRTICK
+	def_bool HIGH_RES_TIMERS
+
 config MIN_BASE_SLICE_NS
 	int "Default value for min_base_slice_ns"
 	default 2000000
@@ -71,6 +74,3 @@ config MIN_BASE_SLICE_NS
 	 Setting this value too high can cause the system to boot with
 	 an unnecessarily large base slice, resulting in high scheduling
 	 latency and poor system responsiveness.
-
-config SCHED_HRTICK
-	def_bool HIGH_RES_TIMERS

@@ -104,10 +104,6 @@
 #include <linux/cpufreq_times.h>
 #include <linux/dma-buf.h>
 
-#ifdef CONFIG_USER_NS
-#include <linux/user_namespace.h>
-#endif
-
 #include <asm/pgalloc.h>
 #include <linux/uaccess.h>
 #include <asm/mmu_context.h>
@@ -116,7 +112,7 @@
 
 #ifdef CONFIG_SCHED_BORE
 #include <linux/sched/bore.h>
-#endif // CONFIG_SCHED_BORE
+#endif /* CONFIG_SCHED_BORE */
 
 #include <trace/events/sched.h>
 
@@ -629,6 +625,14 @@ void free_task(struct task_struct *tsk)
 	scs_release(tsk);
 
 	trace_android_vh_free_task(tsk);
+
+#ifdef CONFIG_SCHED_BORE
+	if (tsk->bore) {
+		kfree(tsk->bore);
+		tsk->bore = NULL;
+	}
+#endif
+
 #ifndef CONFIG_THREAD_INFO_IN_TASK
 	/*
 	 * The task is finally done with both the stack and thread_info,
@@ -2704,15 +2708,16 @@ __latent_entropy struct task_struct *copy_process(
 	 */
 	write_lock_irq(&tasklist_lock);
 #ifdef CONFIG_SCHED_BORE
-	p->se.bore_stats = kzalloc(sizeof(struct sched_bore_stats), GFP_KERNEL);
-	if (unlikely(!p->se.bore_stats)) {
-		pr_err("Failed to allocate memory for bore_stats in task %p\n", p);
+	p->bore = kzalloc(sizeof(struct bore_ctx), GFP_KERNEL);
+	if (unlikely(!p->bore)) {
+		pr_err("Failed to allocate memory for bore in task %p\n", p);
     	put_task_struct(p);
     	return ERR_PTR(-ENOMEM);
 	}
+
 	if (likely(p->pid))
-		sched_clone_bore(p, current, clone_flags, p->start_time);
-#endif // CONFIG_SCHED_BORE
+		task_fork_bore(p, current, clone_flags, p->start_time);
+#endif /* CONFIG_SCHED_BORE */
 
 	/* CLONE_PARENT re-uses the old parent */
 	if (clone_flags & (CLONE_PARENT|CLONE_THREAD)) {

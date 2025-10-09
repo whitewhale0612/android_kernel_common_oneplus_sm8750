@@ -508,7 +508,11 @@ struct sched_statistics {
 	u64				block_max;
 	s64				sum_block_runtime;
 
+#ifndef __GENKSYMS__
+	s64				exec_max;
+#else
 	u64				exec_max;
+#endif
 	u64				slice_max;
 
 	u64				nr_migrations_cold;
@@ -533,9 +537,11 @@ struct sched_statistics {
 #endif /* CONFIG_SCHEDSTATS */
 } ____cacheline_aligned;
 
-#ifdef CONFIG_SCHED_BORE
-struct sched_bore_stats;
-#endif // CONFIG_SCHED_BORE
+struct sched_entity_ext {
+	unsigned char			custom_slice;
+	unsigned char			sched_delayed;
+	unsigned char			rel_deadline;
+};
 
 struct sched_entity {
 	/* For load-balancing: */
@@ -547,6 +553,7 @@ struct sched_entity {
 	struct list_head		group_node;
 	unsigned int			on_rq;
 
+					/* hole */
 	u64				exec_start;
 	u64				sum_exec_runtime;
 	u64				prev_sum_exec_runtime;
@@ -576,11 +583,8 @@ struct sched_entity {
 	 */
 	struct sched_avg		avg;
 #endif
-#ifdef CONFIG_SCHED_BORE
-	ANDROID_KABI_USE(1, struct sched_bore_stats *bore_stats);
-#else // !CONFIG_SCHED_BORE
-	ANDROID_KABI_RESERVE(1);
-#endif // CONFIG_SCHED_BORE
+
+	ANDROID_KABI_USE(1, struct sched_entity_ext ext);
 	ANDROID_KABI_RESERVE(2);
 	ANDROID_KABI_RESERVE(3);
 	ANDROID_KABI_RESERVE(4);
@@ -758,6 +762,32 @@ struct qos_task_struct {
 	struct list_head    qos_list;
 };
 #endif
+
+#ifdef CONFIG_SCHED_BORE
+#define BORE_BC_TIMESTAMP_SHIFT 16
+
+struct bore_bc {
+	u64				timestamp:	48;
+	u64				penalty:	16;
+};
+
+struct bore_ctx {
+	struct bore_bc	subtree;
+	struct bore_bc	group;
+	u64				burst_time;
+	u16				prev_penalty;
+	u16				curr_penalty;
+	union {
+		u16			penalty;
+		struct {
+			u8		_;
+			u8		score;
+		};
+	};
+	bool			stop_update;
+	bool			futex_waiting;
+};
+#endif /* CONFIG_SCHED_BORE */
 
 struct task_struct {
 #ifdef CONFIG_THREAD_INFO_IN_TASK
@@ -1558,7 +1588,11 @@ struct task_struct {
 #else
 	ANDROID_KABI_RESERVE(4);
 #endif
+#ifdef CONFIG_SCHED_BORE
+	ANDROID_KABI_USE(5, struct bore_ctx *bore);
+#else /* !CONFIG_SCHED_BORE */
 	ANDROID_KABI_RESERVE(5);
+#endif /* CONFIG_SCHED_BORE */
 	ANDROID_KABI_RESERVE(6);
 	ANDROID_KABI_RESERVE(7);
 	ANDROID_KABI_RESERVE(8);

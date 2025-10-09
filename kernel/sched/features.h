@@ -6,6 +6,10 @@
  */
 SCHED_FEAT(PLACE_LAG, true)
 SCHED_FEAT(PLACE_DEADLINE_INITIAL, true)
+/*
+ * Inhibit (wakeup) preemption until the current task has either matched the
+ * 0-lag point or until is has exhausted it's slice.
+ */
 SCHED_FEAT(RUN_TO_PARITY, true)
 
 /*
@@ -88,3 +92,24 @@ SCHED_FEAT(UTIL_EST, true)
 SCHED_FEAT(LATENCY_WARN, false)
 
 SCHED_FEAT(HZ_BW, true)
+
+#ifndef __GENKSYMS__
+/*
+ * Preserve relative virtual deadline on 'migration'.
+ */
+SCHED_FEAT(PLACE_REL_DEADLINE, true)
+/*
+ * Delay dequeueing tasks until they get selected or woken.
+ *
+ * By delaying the dequeue for non-eligible tasks, they remain in the
+ * competition and can burn off their negative lag. When they get selected
+ * they'll have positive lag by definition.
+ *
+ * DELAY_ZERO clips the lag on dequeue (or wakeup) to 0.
+ */
+SCHED_FEAT(DELAY_DEQUEUE, false)
+SCHED_FEAT(DELAY_ZERO, true)
+#ifdef CONFIG_SCHED_BORE
+SCHED_FEAT(RUN_TO_PARITY_BORE, false)
+#endif /* CONFIG_SCHED_BORE */
+#endif
