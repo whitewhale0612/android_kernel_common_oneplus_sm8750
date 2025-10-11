@@ -34,6 +34,10 @@
 
 #include <trace/events/timer.h>
 
+#ifdef CONFIG_HMBIRD_SCHED
+#include "../sched/hmbird/hmbird_shadow_tick.h"
+#endif
+
 /*
  * Per-CPU nohz control structure
  */
@@ -1112,6 +1116,9 @@ static bool can_stop_idle_tick(int cpu, struct tick_sched *ts)
 	return true;
 }
 
+#ifdef CONFIG_HMBIRD_SCHED
+extern void android_vh_tick_nohz_idle_stop_tick_handler(void *unused, void *data);
+#endif
 /**
  * tick_nohz_idle_stop_tick - stop the idle tick from the idle task
  *
@@ -1124,6 +1131,9 @@ void tick_nohz_idle_stop_tick(void)
 	ktime_t expires;
 
 	trace_android_vh_tick_nohz_idle_stop_tick(NULL);
+#ifdef CONFIG_HMBIRD_SCHED
+	android_vh_tick_nohz_idle_stop_tick_handler(NULL,NULL);
+#endif
 	/*
 	 * If tick_nohz_get_sleep_length() ran tick_nohz_next_event(), the
 	 * tick timer expiration time is known already.
