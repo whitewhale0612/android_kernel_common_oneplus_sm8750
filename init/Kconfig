@@ -2013,6 +2013,7 @@ source "init/Kconfig.gki"
 
 endif
 source "init/Kconfig.gki-debug"
+<<<<<<< HEAD
 
 menu "BrokeStar"
 
@@ -2020,3 +2021,5 @@ config ORYON_1
 	bool
 
 endmenu
+=======
+>>>>>>> parent of 8eec3d1d7129 (ANDROID: gki_defconfig: Add support for Oryon-1 CPU in ARM64 GKI configuration)
