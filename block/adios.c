@@ -16,6 +16,7 @@
 #include <linux/slab.h>
 #include <linux/timekeeping.h>
 #include <linux/percpu.h>
+#include <linux/string.h>
 
 #include "elevator.h"
 #include "blk.h"
@@ -107,6 +108,7 @@ struct latency_model {
 };
 
 #define ADIOS_BQ_PAGES 2
+#define ADIOS_MAX_INSERTS_PER_LOCK 16
 
 // Adios scheduler data
 struct adios_data {
@@ -421,7 +423,7 @@ static void latency_model_input(struct adios_data *ad,
 	struct lm_buckets *buckets;
 	int cpu = get_cpu();
 
-	buckets = this_cpu_ptr(model->pcpu_buckets);
+	buckets = per_cpu_ptr(model->pcpu_buckets, cpu);
 
 	if (block_size <= LM_BLOCK_SIZE_THRESHOLD) {
 		// Handle small requests
@@ -433,14 +435,18 @@ static void latency_model_input(struct adios_data *ad,
 		buckets->small_bucket[bucket_index].count++;
 		buckets->small_bucket[bucket_index].sum_latency += latency;
 
+		put_cpu();
+
 		if (unlikely(!model->base)) {
 			latency_model_update(ad, model);
 			return;
 		}
 	} else {
 		// Handle large requests
-		if (!model->base || !pred_lat)
+		if (!model->base || !pred_lat) {
+			put_cpu();
 			return;
+		}
 
 		bucket_index = lm_input_bucket_index(latency, pred_lat);
 
@@ -450,6 +456,8 @@ static void latency_model_input(struct adios_data *ad,
 		buckets->large_bucket[bucket_index].count++;
 		buckets->large_bucket[bucket_index].sum_latency += latency;
 		buckets->large_bucket[bucket_index].sum_block_size += block_size;
+
+		put_cpu();
 	}
 }
 
@@ -658,8 +666,6 @@ static void insert_request(struct blk_mq_hw_ctx *hctx, struct request *rq,
 		return;
 	}
 
-	guard(spinlock_irqsave)(&ad->lock);
-
 	if (blk_mq_sched_try_insert_merge(q, rq, free))
 		return;
 
@@ -676,14 +682,24 @@ static void insert_request(struct blk_mq_hw_ctx *hctx, struct request *rq,
 static void adios_insert_requests(struct blk_mq_hw_ctx *hctx,
 				   struct list_head *list,
 				   blk_insert_t insert_flags) {
+	struct request_queue *q = hctx->queue;
+	struct adios_data *ad = q->elevator->elevator_data;
 	struct request *rq;
+	bool stop = false;
 	LIST_HEAD(free);
 
-	while (!list_empty(list)) {
-		rq = list_first_entry(list, struct request, queuelist);
-		list_del_init(&rq->queuelist);
-		insert_request(hctx, rq, insert_flags, &free);
-	}
+	do {
+	scoped_guard(spinlock_irqsave, &ad->lock)
+		for (int i = 0; i < ADIOS_MAX_INSERTS_PER_LOCK; i++) {
+			if (list_empty(list)) {
+				stop = true;
+				break;
+			}
+			rq = list_first_entry(list, struct request, queuelist);
+			list_del_init(&rq->queuelist);
+			insert_request(hctx, rq, insert_flags, &free);
+		}
+	} while (!stop);
 
 	blk_mq_free_requests(&free);
 }
@@ -1246,16 +1262,22 @@ static ssize_t adios_reset_bq_stats_store(
 	return count;
 }
 
-// Reset the latency model parameters
+// Reset the latency model parameters or load them from user input
 static ssize_t adios_reset_lat_model_store(
-		struct elevator_queue *e, const char *page, size_t count) {
+		struct elevator_queue *e, const char *page, size_t count)
+{
 	struct adios_data *ad = e->elevator_data;
-	unsigned long val;
+	struct latency_model *model;
 	int ret;
 
-	ret = kstrtoul(page, 10, &val);
-	if (ret || val != 1)
-		return -EINVAL;
+	/*
+	 * Differentiate between two modes based on input format:
+	 * 1. "1": Fully reset the model (backward compatibility).
+	 * 2. "R_base R_slope W_base W_slope D_base D_slope": Load values.
+	 */
+	if (!strchr(page, ' ')) {
+		// Mode 1: Full reset.
+		unsigned long val;
 
 		ret = kstrtoul(page, 10, &val);
 		if (ret || val != 1)
@@ -1356,9 +1378,9 @@ static struct elv_fs_entry adios_sched_attrs[] = {
 	AD_ATTR_RW(batch_limit_write),
 	AD_ATTR_RW(batch_limit_discard),
 
-	AD_ATTR_RO(lat_model_read),
-	AD_ATTR_RO(lat_model_write),
-	AD_ATTR_RO(lat_model_discard),
+	AD_ATTR_RW(lat_model_read),
+	AD_ATTR_RW(lat_model_write),
+	AD_ATTR_RW(lat_model_discard),
 
 	AD_ATTR_RW(lat_target_read),
 	AD_ATTR_RW(lat_target_write),
