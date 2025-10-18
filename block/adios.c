@@ -392,8 +392,7 @@ static void latency_model_update(
 }
 
 // Determine the bucket index for a given measured and predicted latency
-static u8 lm_input_bucket_index(
-		struct latency_model *model, u64 measured, u64 predicted) {
+static u8 lm_input_bucket_index(u64 measured, u64 predicted) {
 	u8 bucket_index;
 
 	if (measured < predicted * 2)
@@ -416,7 +415,7 @@ static void latency_model_input(struct adios_data *ad,
 
 	if (block_size <= LM_BLOCK_SIZE_THRESHOLD) {
 		// Handle small requests
-		bucket_index = lm_input_bucket_index(model, latency, model->base ?: 1);
+		bucket_index = lm_input_bucket_index(latency, model->base ?: 1);
 
 		if (bucket_index >= LM_LAT_BUCKET_COUNT)
 			bucket_index = LM_LAT_BUCKET_COUNT - 1;
@@ -623,14 +622,12 @@ static void adios_merged_requests(struct request_queue *q, struct request *req,
 // Try to merge a bio into an existing rq before associating it with an rq
 static bool adios_bio_merge(struct request_queue *q, struct bio *bio,
 		unsigned int nr_segs) {
-	unsigned long flags;
 	struct adios_data *ad = q->elevator->elevator_data;
 	struct request *free = NULL;
 	bool ret;
 
-	spin_lock_irqsave(&ad->lock, flags);
-	ret = blk_mq_sched_try_merge(q, bio, nr_segs, &free);
-	spin_unlock_irqrestore(&ad->lock, flags);
+	scoped_guard(spinlock_irqsave, &ad->lock)
+		ret = blk_mq_sched_try_merge(q, bio, nr_segs, &free);
 
 	if (free)
 		blk_mq_free_request(free);
@@ -641,15 +638,13 @@ static bool adios_bio_merge(struct request_queue *q, struct bio *bio,
 // Insert a request into the scheduler
 static void insert_request(struct blk_mq_hw_ctx *hctx, struct request *rq,
 				  blk_insert_t insert_flags, struct list_head *free) {
-	unsigned long flags;
 	bool dl_idx = adios_optype_not_read(rq);
 	struct request_queue *q = hctx->queue;
 	struct adios_data *ad = q->elevator->elevator_data;
 
 	if (insert_flags & BLK_MQ_INSERT_AT_HEAD) {
-		spin_lock_irqsave(&ad->pq_lock, flags);
-		list_add(&rq->queuelist, &ad->prio_queue);
-		spin_unlock_irqrestore(&ad->pq_lock, flags);
+		scoped_guard(spinlock_irqsave, &ad->pq_lock)
+			list_add_tail(&rq->queuelist, &ad->prio_queue);
 		return;
 	}
 
