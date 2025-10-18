@@ -849,20 +849,6 @@ endif
 KBUILD_RUSTFLAGS += -Cdebug-assertions=$(if $(CONFIG_RUST_DEBUG_ASSERTIONS),y,n)
 KBUILD_RUSTFLAGS += -Coverflow-checks=$(if $(CONFIG_RUST_OVERFLOW_CHECKS),y,n)
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-ifdef CONFIG_ORYON_1
-KBUILD_CFLAGS += -mcpu=orion-1
-endif
-
-=======
->>>>>>> parent of 8eec3d1d7129 (ANDROID: gki_defconfig: Add support for Oryon-1 CPU in ARM64 GKI configuration)
-=======
-ifdef CONFIG_ARCH_ORYON
-KBUILD_CFLAGS += -mcpu=oryon-1
-endif
-
->>>>>>> 8eec3d1d7129 (ANDROID: gki_defconfig: Add support for Oryon-1 CPU in ARM64 GKI configuration)
 ifdef CONFIG_LLVM_POLLY
 KBUILD_CFLAGS	+= -fvectorize -funroll-loops -mllvm -polly \
 		   -mllvm -polly-run-inliner \
