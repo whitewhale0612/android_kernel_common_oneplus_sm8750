@@ -18,7 +18,6 @@
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
-#define FORCED_LOG_BUF_LEN (16 * 1024 * 1024)
 
 #include <linux/kernel.h>
 #include <linux/mm.h>
@@ -1144,10 +1143,6 @@ void __init setup_log_buf(int early)
 	unsigned int free;
 	u64 seq;
 
-    if (!early) {
-        new_log_buf_len = FORCED_LOG_BUF_LEN;
-    }
-
 	/*
 	 * Some archs call setup_log_buf() multiple times - first is very
 	 * early, e.g. from setup_arch(), and second - when percpu_areas
@@ -1165,7 +1160,7 @@ void __init setup_log_buf(int early)
 	if (!new_log_buf_len)
 		return;
 
-	new_descs_count = max((FORCED_LOG_BUF_LEN >> PRB_AVGBITS), 4096U);
+	new_descs_count = new_log_buf_len >> PRB_AVGBITS;
 	if (new_descs_count == 0) {
 		pr_err("new_log_buf_len: %lu too small\n", new_log_buf_len);
 		return;

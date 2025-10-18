@@ -2195,8 +2195,7 @@ static int zram_add(void)
 {
 	struct zram *zram;
 	int ret, device_id;
-	u64 default_disksize = 17179869184ULL; // 16GB in bytes
-
+	
 	zram = kzalloc(sizeof(struct zram), GFP_KERNEL);
 	if (!zram)
 		return -ENOMEM;
@@ -2230,35 +2229,6 @@ static int zram_add(void)
 
 	/* Actual capacity set using sysfs (/sys/block/zram<id>/disksize */
 	set_capacity(zram->disk, 0);
-
-	down_write(&zram->init_lock);
-	if (!zram_meta_alloc(zram, default_disksize)) {
-		up_write(&zram->init_lock);
-		ret = -ENOMEM;
-		goto out_cleanup_disk;
-	}
-
-	for (u32 prio = 0; prio < ZRAM_MAX_COMPS; prio++) {
-		if (!zram->comp_algs[prio])
-			continue;
-
-		struct zcomp *comp = zcomp_create(zram->comp_algs[prio]);
-		if (IS_ERR(comp)) {
-			pr_err("Cannot initialise %s compressing backend\n",
-				zram->comp_algs[prio]);
-			zram_destroy_comps(zram); // 清理已创建的压缩器
-			zram_meta_free(zram, default_disksize); // 释放元数据
-			up_write(&zram->init_lock);
-			ret = PTR_ERR(comp);
-			goto out_cleanup_disk;
-		}
-		zram->comps[prio] = comp;
-		zram->num_active_comps++;
-	}
-
-	zram->disksize = default_disksize;
-	set_capacity_and_notify(zram->disk, zram->disksize >> SECTOR_SHIFT);
-	up_write(&zram->init_lock);
 
 	/* zram devices sort of resembles non-rotational disks */
 	blk_queue_flag_set(QUEUE_FLAG_NONROT, zram->disk->queue);
@@ -2295,7 +2265,7 @@ static int zram_add(void)
 	comp_algorithm_set(zram, ZRAM_PRIMARY_COMP, default_compressor);
 
 	zram_debugfs_register(zram);
-	pr_info("Added device: %s with default size %llu bytes\n", zram->disk->disk_name, default_disksize);
+	pr_info("Added device: %s\n", zram->disk->disk_name);
 	return device_id;
 
 out_cleanup_disk:
