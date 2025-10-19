@@ -110,6 +110,17 @@ DECLARE_HOOK(android_vh_direct_reclaim_begin,
 DECLARE_HOOK(android_vh_direct_reclaim_end,
 	TP_PROTO(int prio),
 	TP_ARGS(prio));
+DECLARE_HOOK(android_vh_mm_isolate_priv_lru,
+	TP_PROTO(unsigned long nr_to_scan, struct lruvec *lruvec, enum lru_list lru,
+		struct list_head *dst, int reclaim_idx, bool may_unmap,
+		unsigned long *nr_scanned, unsigned long *nr_taken),
+	TP_ARGS(nr_to_scan, lruvec, lru, dst, reclaim_idx, may_unmap, nr_scanned, nr_taken));
+DECLARE_HOOK(android_vh_mm_customize_pgdat_balanced,
+	TP_PROTO(int order, int highest_zoneidx, bool *balanced, bool *customized),
+	TP_ARGS(order, highest_zoneidx, balanced, customized));
+DECLARE_HOOK(android_vh_mm_customize_file_is_tiny,
+	TP_PROTO(unsigned int may_swap, int order, int highest_zoneidx, bool *file_is_tiny),
+	TP_ARGS(may_swap, order, highest_zoneidx, file_is_tiny));
 #endif /* _TRACE_HOOK_VMSCAN_H */
 /* This part must be outside protection */
 #include <trace/define_trace.h>
