@@ -531,7 +531,7 @@ static bool root_reclaim(struct scan_control *sc)
 
 static bool writeback_throttling_sane(struct scan_control *sc)
 {
-	return true;
+	return READ_ONCE(vm_swappiness);
 }
 #endif
 
@@ -3376,7 +3376,7 @@ static void get_scan_count(struct lruvec *lruvec, struct scan_control *sc,
 	ap = swappiness * (total_cost + 1);
 	ap /= anon_cost + 1;
 
-	fp = (200 - swappiness) * (total_cost + 1);
+	fp = (MAX_SWAPPINESS - swappiness) * (total_cost + 1);
 	fp /= file_cost + 1;
 
 	fraction[0] = ap;
@@ -5359,6 +5359,7 @@ static bool sort_folio(struct lruvec *lruvec, struct folio *folio, struct scan_c
 		       int tier_idx)
 {
 	bool success;
+	bool dirty, writeback;
 	int gen = folio_lru_gen(folio);
 	int type = folio_is_file_lru(folio);
 	int zone = folio_zonenum(folio);
@@ -5416,6 +5417,15 @@ static bool sort_folio(struct lruvec *lruvec, struct folio *folio, struct scan_c
 		list_move_tail(&folio->lru, &lrugen->folios[gen][type][zone]);
 		return true;
 	}
+
+	dirty = folio_test_dirty(folio);
+	writeback = folio_test_writeback(folio);
+	if (type == LRU_GEN_FILE && dirty) {
+		sc->nr.file_taken += delta;
+		if (!writeback)
+			sc->nr.unqueued_dirty += delta;
+	}
+
 
 	/* waiting for writeback */
 	if (writeback || (type == LRU_GEN_FILE && dirty)) {
@@ -6487,7 +6497,8 @@ static int run_cmd(char cmd, int memcg_id, int nid, unsigned long seq,
 
 	if (swappiness < 0)
 		swappiness = get_swappiness(lruvec, sc);
-	else if (swappiness > 200)
+	else if (swappiness > MAX_SWAPPINESS)
+
 		goto done;
 
 	switch (cmd) {

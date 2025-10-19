@@ -360,7 +360,7 @@
   __traceiter_block_rq_issue
   __traceiter_block_rq_merge
   __traceiter_block_rq_requeue
-
+  __traceiter_android_vh_evict_folios_bypass
   __tracepoint_android_rvh_post_init_entity_util_avg
   __tracepoint_android_rvh_rtmutex_force_update
   __tracepoint_android_rvh_set_cpus_allowed_comm
@@ -492,6 +492,7 @@
   __tracepoint_android_vh_tune_swappiness
   __tracepoint_android_vh_unreserve_highatomic_bypass
   __tracepoint_android_vh_update_page_mapcount
+  __tracepoint_android_vh_evict_folios_bypass
   __tracepoint_block_bio_queue
   __tracepoint_block_getrq
   __tracepoint_block_rq_complete

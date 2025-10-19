@@ -41,7 +41,10 @@ DECLARE_HOOK(android_vh_inode_lru_isolate,
 DECLARE_HOOK(android_vh_invalidate_mapping_pagevec,
 	TP_PROTO(struct address_space *mapping, bool *skip),
 	TP_ARGS(mapping, skip));
-
+DECLARE_HOOK(android_vh_evict_folios_bypass,
+	TP_PROTO(struct folio *folio, bool *bypass),
+	TP_ARGS(folio, bypass));
+	
 enum scan_balance;
 DECLARE_HOOK(android_vh_tune_scan_type,
 	TP_PROTO(enum scan_balance *scan_type),
