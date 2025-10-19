@@ -611,6 +611,11 @@ static ssize_t backing_dev_store(struct device *dev,
 	}
 
 	nr_pages = i_size_read(inode) >> PAGE_SHIFT;
+	/* Refuse to use zero sized device (also prevents self reference) */
+	if (!nr_pages) {
+		err = -EINVAL;
+		goto out;
+	}
 	bitmap_sz = BITS_TO_LONGS(nr_pages) * sizeof(long);
 	bitmap = kvzalloc(bitmap_sz, GFP_KERNEL);
 	if (!bitmap) {
@@ -1305,16 +1310,20 @@ static void zram_meta_free(struct zram *zram, u64 disksize)
 	size_t num_pages = disksize >> PAGE_SHIFT;
 	size_t index;
 
+	if (!zram->table)
+		return;
 	/* Free all pages that are still in this zram device */
 	for (index = 0; index < num_pages; index++)
 		zram_free_page(zram, index);
 
 	zs_destroy_pool(zram->mem_pool);
 
+
 	/* Destroy the per-device idle LRU */
 	list_lru_destroy(&zram->zram_list_lru);
 	
 	vfree(zram->table);
+	zram->table = NULL;
 }
 
 static bool zram_meta_alloc(struct zram *zram, u64 disksize)
@@ -1334,6 +1343,7 @@ static bool zram_meta_alloc(struct zram *zram, u64 disksize)
 	zram->mem_pool = zs_create_pool(zram->disk->disk_name);
 	if (!zram->mem_pool) {
 		vfree(zram->table);
+		zram->table = NULL;
 		return false;
 	}
 
@@ -1747,6 +1757,13 @@ static int zram_recompress(struct zram *zram, u32 index, struct page *page,
 	ret = zram_read_from_zspool(zram, page, index);
 	if (ret)
 		return ret;
+
+		/*
+	 * We touched this entry so mark it as non-IDLE. This makes sure that
+	 * we don't preserve IDLE flag and don't incorrectly pick this entry
+	 * for different post-processing type (e.g. writeback).
+	 */
+	zram_clear_flag(zram, index, ZRAM_IDLE);
 
 	class_index_old = zs_lookup_class_index(zram->mem_pool, comp_len_old);
 	/*
@@ -2176,11 +2193,11 @@ u64 calculate_pressure_factor_log_slow_to_fast_kernel(u64 mem_pressure, u64 zram
     s32 scaling_factor_log;
     u64 combined_pressure_factor_percent;
 
-    if (mem_pressure > 50) {
-        pressure_diff += (s32)(mem_pressure - 50);
+    if (mem_pressure > 60) {
+        pressure_diff += (s32)(mem_pressure - 60);
     }
-    if (zram_pressure > 30) {
-        pressure_diff += (s32)(zram_pressure - 30);
+    if (zram_pressure > 50) {
+        pressure_diff += (s32)(zram_pressure - 50);
     }
 
     if (pressure_diff <= 0) {
@@ -2846,7 +2863,7 @@ static void __maybe_unused zram_writeback(struct zram *zram)
 		return;
 	}
 	mark_idle(zram, 0);
-writeback_store(disk_to_dev(zram->disk), &attr, buf_write_back, len_write_back);
+	writeback_store(disk_to_dev(zram->disk), &attr, buf_write_back, len_write_back);
 
 	up_read(&zram->init_lock);
 }
@@ -3378,7 +3395,7 @@ out_error:
 
 static void __exit zram_exit(void)
 {
-	#ifdef CONFIG_ZRAM_WRITEBACK
+#ifdef CONFIG_ZRAM_WRITEBACK
 	if (monitor_thread) {
 		kthread_stop(monitor_thread);
 		monitor_thread = NULL;
