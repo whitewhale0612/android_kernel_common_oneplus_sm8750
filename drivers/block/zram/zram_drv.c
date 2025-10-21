@@ -54,7 +54,7 @@
 #include "zram_drv.h"
 
 #define CHECK_INTERVAL (90 * HZ) // 每30秒检查一次
-#define MEM_THRESHOLD 80 // 内存占用率阈值80%
+#define MEM_THRESHOLD 80
 
 static u64 batch_size = 512;
 
@@ -359,6 +359,12 @@ static void mark_idle(struct zram *zram, ktime_t cutoff)
 		/*
 		 * Do not mark ZRAM_UNDER_WB slot as ZRAM_IDLE to close race.
 		 * See the comment in writeback_store.
+		 *
+		 * Also do not mark ZRAM_SAME slots as ZRAM_IDLE, because no
+		 * post-processing (recompress, writeback) happens to the
+		 * ZRAM_SAME slot.
+		 *
+		 * And ZRAM_WB slots simply cannot be ZRAM_IDLE.
 		 */
 		zram_slot_lock(zram, index);
 		if (!zram_allocated(zram, index) ||
@@ -370,7 +376,7 @@ static void mark_idle(struct zram *zram, ktime_t cutoff)
 		}
 
 #ifdef CONFIG_ZRAM_TRACK_ENTRY_ACTIME
-	if (!cutoff || ktime_after(cutoff, zram->table[index].ac_time)) {
+		if (!cutoff || ktime_after(cutoff, zram->table[index].ac_time)) {
 			if (!zram_test_flag(zram, index, ZRAM_IDLE)) {
 				zram_set_flag(zram, index, ZRAM_IDLE);
 				/* Add to LRU list for shrinker */
@@ -394,7 +400,7 @@ static void mark_idle(struct zram *zram, ktime_t cutoff)
 			zram_lru_add(zram, &zram->table[index]);
 		}
 #endif
-            zram_slot_unlock(zram, index);
+		zram_slot_unlock(zram, index);
 	}
 }
 
@@ -412,7 +418,7 @@ static ssize_t idle_store(struct device *dev,
 		 */
 		u64 age_sec;
 
-		if (IS_ENABLED(CONFIG_ZRAM_MEMORY_TRACKING) && !kstrtoull(buf, 0, &age_sec))
+		if (IS_ENABLED(CONFIG_ZRAM_TRACK_ENTRY_ACTIME) && !kstrtoull(buf, 0, &age_sec))
 			cutoff_time = ktime_sub(ktime_get_boottime(),
 					ns_to_ktime(age_sec * NSEC_PER_SEC));
 		else
@@ -616,6 +622,7 @@ static ssize_t backing_dev_store(struct device *dev,
 		err = -EINVAL;
 		goto out;
 	}
+
 	bitmap_sz = BITS_TO_LONGS(nr_pages) * sizeof(long);
 	bitmap = kvzalloc(bitmap_sz, GFP_KERNEL);
 	if (!bitmap) {
@@ -1312,13 +1319,13 @@ static void zram_meta_free(struct zram *zram, u64 disksize)
 
 	if (!zram->table)
 		return;
+
 	/* Free all pages that are still in this zram device */
 	for (index = 0; index < num_pages; index++)
 		zram_free_page(zram, index);
 
 	zs_destroy_pool(zram->mem_pool);
-
-
+	
 	/* Destroy the per-device idle LRU */
 	list_lru_destroy(&zram->zram_list_lru);
 	
@@ -1336,7 +1343,7 @@ static bool zram_meta_alloc(struct zram *zram, u64 disksize)
 	if (!zram->table)
 		return false;
 
-		/* Initialize the LRU list heads for each table entry */
+	/* Initialize the LRU list heads for each table entry */
 	for (index = 0; index < num_pages; index++)
 		INIT_LIST_HEAD(&zram->table[index].lru);
 
@@ -1349,7 +1356,7 @@ static bool zram_meta_alloc(struct zram *zram, u64 disksize)
 
 	if (!huge_class_size)
 		huge_class_size = zs_huge_class_size(zram->mem_pool);
-
+	
 	/* Initialize the per-device idle LRU */
 	if (list_lru_init(&zram->zram_list_lru))
 		return false;
@@ -1366,7 +1373,7 @@ static void zram_free_page(struct zram *zram, size_t index)
 {
 	unsigned long handle;
 
-#ifdef CONFIG_ZRAM_MEMORY_TRACKING
+#ifdef CONFIG_ZRAM_TRACK_ENTRY_ACTIME
 	zram->table[index].ac_time = 0;
 #endif
 	/* Remove from LRU list if present */
@@ -1433,7 +1440,7 @@ static int read_incompressible_page(struct zram *zram, struct page *page,
 {
 	unsigned long handle;
 	void *src, *dst;
-	
+
 	handle = zram_get_handle(zram, index);
 	src = zs_map_object(zram->mem_pool, handle, ZS_MM_RO);
 	dst = kmap_local_page(page);
@@ -1614,7 +1621,7 @@ static int zram_write_page(struct zram *zram, struct page *page, u32 index)
 	zram_slot_lock(zram, index);
 	zram_free_page(zram, index);
 	zram_slot_unlock(zram, index);
-	
+
 
 	mem = kmap_atomic(page);
 	same_filled = page_same_filled(mem, &element);
@@ -1758,7 +1765,7 @@ static int zram_recompress(struct zram *zram, u32 index, struct page *page,
 	if (ret)
 		return ret;
 
-		/*
+	/*
 	 * We touched this entry so mark it as non-IDLE. This makes sure that
 	 * we don't preserve IDLE flag and don't incorrectly pick this entry
 	 * for different post-processing type (e.g. writeback).
@@ -2293,7 +2300,7 @@ static ssize_t disksize_store(struct device *dev,
         disksize  = memparse(buf, NULL);
 	}
 #else
-	disksize = 17179869184(buf, NULL);
+	disksize = memparse(buf, NULL);
 #endif
 
 	if (!disksize)
@@ -2862,9 +2869,9 @@ static void __maybe_unused zram_writeback(struct zram *zram)
 		pr_debug("Writeback skipped: device not initialized or no backing device\n");
 		return;
 	}
+
 	mark_idle(zram, 0);
 	writeback_store(disk_to_dev(zram->disk), &attr, buf_write_back, len_write_back);
-
 	up_read(&zram->init_lock);
 }
 
@@ -2878,7 +2885,7 @@ static unsigned long get_zram_usage(struct zram *zram)
 		up_read(&zram->init_lock);
 		return 0;
 	}
-
+	
 	pages_stored = atomic64_read(&zram->stats.pages_stored);
 	bd_count = atomic64_read(&zram->stats.bd_count);
 	total_pages = zram->disksize >> PAGE_SHIFT;
@@ -2924,18 +2931,18 @@ static int monitor_func(void *data)
 		int mem_usage = get_memory_usage();
 		total_zram_usage = 0;
 		zram_count = 0;
-		if(IS_ENABLED(CONFIG_ZRAM_TRACK_ENTRY_ACTIME))
-		   cutoff_time = ktime_sub(ktime_get_boottime(), ns_to_ktime(30 * NSEC_PER_SEC));
-		
+		if (IS_ENABLED(CONFIG_ZRAM_TRACK_ENTRY_ACTIME))
+			cutoff_time = ktime_sub(ktime_get_boottime(), ns_to_ktime(30 * NSEC_PER_SEC));
 
+		
 		mutex_lock(&zram_index_mutex);
 		idr_for_each_entry(&zram_index_idr, zram, id) {
 			unsigned long zram_usage = get_zram_usage(zram);
 			total_zram_usage += zram_usage;
 			zram_count++;
 
-            down_read(&zram->init_lock);
-			// 标记超过1分钟不活跃的页面为空闲,进入收缩器队列
+			down_read(&zram->init_lock);
+			// 如果标记5分钟甚至是1分钟进入空闲,我们标记不到任何页面,而30秒会标记大约1/6的页面,是比较理想的状态
 			if (cutoff_time != 0)
 				mark_idle(zram, cutoff_time);
 			up_read(&zram->init_lock);
@@ -2978,13 +2985,13 @@ static enum lru_status zram_shrink_cb(struct list_head *item, struct list_lru_on
     struct zram_table_entry *entry = container_of(item, struct zram_table_entry, lru);
     struct zram_shrink_ctx *ctx = (struct zram_shrink_ctx *)arg;
     struct zram *zram = ctx->zram;
-	bool *encountered_in_swapcache = ctx->encountered_in_swapcache;
+    bool *encountered_in_swapcache = ctx->encountered_in_swapcache;
     int swapcache_count = 0;
     enum lru_status ret = LRU_REMOVED_RETRY;
     int writeback_result;
     u32 index;
 
-    /*
+	/*
 	 * Second chance algorithm: if the entry has its referenced bit set, give it
 	 * a second chance. Only clear the referenced bit and rotate it in the
 	 * zram's LRU list.
@@ -3372,7 +3379,7 @@ static int __init zram_init(void)
 			goto out_error;
 		num_devices--;
 	}
-	
+
 #ifdef CONFIG_ZRAM_WRITEBACK
 	monitor_thread = kthread_run(monitor_func, NULL, "zram_monitor");
 #endif
