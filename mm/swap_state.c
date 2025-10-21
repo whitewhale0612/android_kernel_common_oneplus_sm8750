@@ -549,6 +549,8 @@ struct page *read_swap_cache_async(swp_entry_t entry, gfp_t gfp_mask,
 	return retpage;
 }
 
+EXPORT_SYMBOL_GPL(read_swap_cache_async);
+
 static unsigned int __swapin_nr_pages(unsigned long prev_offset,
 				      unsigned long offset,
 				      int hits,
@@ -678,7 +680,11 @@ struct page *swap_cluster_readahead(swp_entry_t entry, gfp_t gfp_mask,
 	lru_add_drain();	/* Push any new pages onto the LRU now */
 skip:
 	/* The page was likely read above, so no need for plugging here */
-	return read_swap_cache_async(entry, gfp_mask, vma, addr, NULL);
+	page = __read_swap_cache_async(entry, gfp_mask, vma, addr, &page_allocated);
+	if (unlikely(page_allocated)) {
+		swap_readpage(page, false, NULL);
+	}
+	return page;
 }
 
 int init_swap_address_space(unsigned int type, unsigned long nr_pages)
@@ -845,10 +851,13 @@ static struct page *swap_vma_readahead(swp_entry_t fentry, gfp_t gfp_mask,
 	lru_add_drain();
 skip:
 	/* The page was likely read above, so no need for plugging here */
-	return read_swap_cache_async(fentry, gfp_mask, vma, vmf->address,
-				     NULL);
+	page = __read_swap_cache_async(fentry, gfp_mask, vma, vmf->address,
+				    &page_allocated);
+	if (unlikely(page_allocated)) {
+		swap_readpage(page, false, NULL);
+	}
+	return page;
 }
-
 /**
  * swapin_readahead - swap in pages in hope we need them soon
  * @entry: swap entry of this memory
