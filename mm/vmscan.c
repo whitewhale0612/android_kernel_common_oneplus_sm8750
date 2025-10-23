@@ -5687,6 +5687,7 @@ static int evict_folios(struct lruvec *lruvec, struct scan_control *sc, int swap
 		return scanned;
 retry:
 	reclaimed = shrink_folio_list(&list, pgdat, sc, &stat, false);
+	sc->nr.unqueued_dirty += stat.nr_unqueued_dirty;
 	sc->nr_reclaimed += reclaimed;
 	trace_mm_vmscan_lru_shrink_inactive(pgdat->node_id,
 			scanned, reclaimed, &stat, sc->priority,
@@ -5696,6 +5697,7 @@ retry:
 		DEFINE_MIN_SEQ(lruvec);
 		bool bypass = false;
 
+		trace_android_vh_evict_folios_bypass(folio, &bypass);
 		if (bypass)
 			continue;
 
