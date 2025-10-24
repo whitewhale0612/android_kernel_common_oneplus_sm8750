@@ -117,6 +117,7 @@ struct dma_fence *sync_file_get_fence(int fd)
 EXPORT_SYMBOL(sync_file_get_fence);
 /**
  * sync_file_merge() - merge two sync_files
+ * @name:	name of new fence
  * @a:		sync_file a
  * @b:		sync_file b
  *
@@ -296,9 +297,12 @@ static long sync_file_ioctl_fence_info(struct sync_file *sync_file,
 		if (copy_to_user(u64_to_user_ptr(dest), &fence_info,
 				 sizeof(fence_info)))
 			return -EFAULT;
+
+
 	}
 
 no_fences:
+
 	info.num_fences = num_fences;
 	if (copy_to_user((void __user *)arg, &info.status, len))
 		return -EFAULT;
