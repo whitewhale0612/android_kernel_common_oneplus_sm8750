@@ -426,7 +426,7 @@ static void zs_zpool_obj_write(void *pool, unsigned long handle,
 
 static u64 zs_zpool_total_pages(void *pool)
 {
-	return zs_get_total_pages(pool);
+	return zs_get_total_pages(pool) << PAGE_SHIFT;
 }
 
 static struct zpool_driver zs_zpool_driver = {
