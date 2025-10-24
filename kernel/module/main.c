@@ -2393,10 +2393,6 @@ static char *custom_module_blacklist[] = {
 #if IS_BUILTIN(CONFIG_ZSMALLOC)
     "zsmalloc",
 #endif
-#if IS_BUILTIN(CONFIG_TCP_CONG_BBR)
-	/* BBR3 compatibility*/
-    "oplus_network_tuning",
-#endif
 	/* Coresight, Do not disable the coresight core, as it is dependent on msm_kgsl. */
 	"coresight_tpda", "coresight_tgu", "coresight_trace_noc", 
 	"coresight_cti", "coresight_qmi", "coresight_dummy", 
